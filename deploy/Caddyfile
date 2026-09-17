@@ -1,0 +1,6 @@
+{$SKILLBOX_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy app:4791 {
+		flush_interval -1
+	}
+}
