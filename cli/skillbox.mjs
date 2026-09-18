@@ -167,6 +167,34 @@ async function main() {
     );
     return;
   }
+  if (command === "audit") {
+    const items = [];
+    let offset = 0;
+    for (;;) {
+      const page = await request("/api/skill-compatibility?offset=" + offset);
+      items.push(...page.items);
+      if (!page.hasMore) break;
+      if (!Number.isSafeInteger(page.nextOffset) || page.nextOffset <= offset)
+        throw new Error("Invalid audit pagination");
+      offset = page.nextOffset;
+    }
+    const incompatible = items.filter((item) => !item.compatible).length;
+    console.log(JSON.stringify({
+      format: "skillbox/compatibility-v1",
+      total: items.length,
+      compatible: items.length - incompatible,
+      incompatible,
+      warningCount: items.reduce((n, item) => n + item.issues.filter((issue) => issue.severity === "warning").length, 0),
+      items,
+    }, null, 2));
+    if (incompatible) process.exitCode = 1;
+    return;
+  }
+  if (command === "manifest") {
+    if (!arg) throw new Error("Usage: skillbox manifest <id>");
+    console.log(JSON.stringify(await request("/api/skills/" + encodeURIComponent(arg) + "/manifest"), null, 2));
+    return;
+  }
   if (command === "load") {
     if (!arg) throw new Error("Supply a skill ID");
     console.log(
@@ -269,7 +297,7 @@ async function main() {
     return;
   }
   console.log(
-    "skillbox list | search <query> | recommend <task> | load <id> | resolve <bundle-id> | fetch <id>@<revision> | publish <directory> <id> <expectedRevision|new> | mcp | configure",
+    "skillbox list | search <query> | recommend <task> | audit | manifest <id> | load <id> | resolve <bundle-id> | fetch <id>@<revision> | publish <directory> <id> <expectedRevision|new> | mcp | configure",
   );
 }
 main().catch((e) => {

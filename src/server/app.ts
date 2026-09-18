@@ -22,6 +22,7 @@ import * as lib from "./library";
 import { handleMcp, fileSchema } from "./mcp";
 import type { Principal } from "../shared";
 import { recommendationInput } from "./recommendations";
+import { compatibilityPage, manifestFor } from "./skill-resources";
 export const app = new Hono<{ Variables: { principal: Principal } }>();
 const loginAttempts: number[] = [];
 app.use("*", async (c, next) => {
@@ -180,6 +181,13 @@ app.post("/api/skill-recommendations", async (c) => {
     ),
   );
 });
+app.get("/api/skill-compatibility", async (c) => {
+  const { offset } = z.object({ offset: z.coerce.number().int().min(0).max(99_999_999).default(0) }).parse(c.req.query());
+  return c.json(await compatibilityPage(c.get("principal"), offset));
+});
+app.get("/api/skills/:id/manifest", async (c) =>
+  c.json(await manifestFor(c.get("principal"), c.req.param("id"))),
+);
 app.get("/api/skill-references/:referenceId", async (c) =>
   c.json(
     await lib.resolveSkillReference(

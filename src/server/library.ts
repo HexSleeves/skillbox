@@ -659,7 +659,7 @@ export async function history(p: Principal, id: string) {
 }
 export function makeFile(
   path: string,
-  text: string,
+  text: string | Buffer,
   executable = false,
 ): SkillFile {
   const b = Buffer.from(text);

@@ -102,6 +102,7 @@ A self-hosted, versioned skills library for AI agents. React, Bun, Hono and Post
 - Profiles with skill/bundle grants and independent create, update, archive and proposal permissions.
 - Revocable client keys, usage reporting and owner-reviewed updates.
 - HTTP MCP, a Node/Bun stdio bridge and checksum-verified CLI downloads.
+- Base MCP Resources, standards-shaped skill manifests and a non-mutating compatibility audit.
 - Optional task-aware Jev recommendations using **your own TypeSafe AI or Vercel AI Gateway key**.
 - Optional Executor integration using **your own endpoint and authentication**.
 - Native folder imports/exports, protected PostgreSQL/config backups and explicit restore tooling.
@@ -173,6 +174,8 @@ node cli/skillbox.mjs list
 node cli/skillbox.mjs search "database migration"
 node cli/skillbox.mjs recommend "Fix choppy scrolling in an Expo app"
 node cli/skillbox.mjs load my-skill
+node cli/skillbox.mjs manifest my-skill
+node cli/skillbox.mjs audit # Owner-only; exits 1 for incompatible packages
 node cli/skillbox.mjs fetch my-skill@REVISION
 node cli/skillbox.mjs publish ./my-skill my-skill EXPECTED_REVISION
 ```
@@ -182,6 +185,20 @@ Base MCP tools: `search_skills`, `recommend_skills`, `load_skill`, `read_skill_f
 Fetching validates every path, file hash, size, executable flag and package checksum, then writes atomically. It never runs code or installs dependencies. Revoking a key blocks future access but cannot retract already downloaded files. Bundles expand grants into deduplicated current leaf skills; references never grant access by themselves.
 
 `scripts/install-client.py` optionally configures Codex, Claude or Cursor from explicit per-client credentials on stdin, preserving existing settings and making local backups. Review any installer before running it.
+
+## Native MCP Skills readiness
+
+Skillbox now exposes compatible, authorized skills through base MCP `resources/list`
+and `resources/read`, alongside all existing tools. A manifest preview and owner-only
+compatibility audit prepare existing packages without rewriting them. Binary and large
+supporting files are available as resources; reading a resource never activates or
+executes a skill.
+
+Full `io.modelcontextprotocol/skills` support is **not advertised yet**: the current
+SDK/base protocol still needs the native discovery and negotiation upgrade. See
+[MCP Skills readiness and release gates](docs/mcp-skills.md) for exact shipped scope,
+URI semantics and migration steps. [Hosted roadmap](docs/hosted-roadmap.md) covers a
+future managed offering; this release remains single-owner and self-hosted.
 
 ## Recommendation contract
 

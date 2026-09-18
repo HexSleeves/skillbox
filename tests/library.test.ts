@@ -453,6 +453,73 @@ test("MCP advertises usage reporting alongside reader and writer tools", async (
     );
   }
 });
+test("MCP Resources and manifest previews preserve grants, integrity and legacy tools", async () => {
+  const { skillResourceUri } = await import("../src/skill-manifest");
+  const id = "test-native-" + randomUUID().slice(0, 8);
+  const legacyId = "test-legacy-" + randomUUID().slice(0, 8);
+  ids.push(id, legacyId);
+  const bytes = Buffer.from([0, 255, 42]);
+  const revision = await publish(ADMIN, id, [
+    ...files(id), makeFile("assets/data.bin", bytes),
+    makeFile("references/large.txt", "x".repeat(170_000)),
+  ], null);
+  await publish(ADMIN, legacyId, [makeFile("SKILL.md", "---\ndescription: Missing required name\n---\nLegacy")], null);
+  const client = await createClient("Resources fixture", "reader", false, [id]);
+  const rpc = async (method: string, params: unknown = {}, token = client.token) => (await (await app.request("/mcp", {
+    method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  })).json());
+  const get = async (path: string, key = client.token) => app.request(path, { headers: { Authorization: "Bearer " + key } });
+  try {
+    const loaded = await load(ADMIN, id);
+    const uri = skillResourceUri(loaded.referenceId, id);
+    const init = await rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "fixture", version: "1" } });
+    expect(init.result.capabilities.resources).toBeDefined();
+    expect(init.result.capabilities.extensions?.["io.modelcontextprotocol/skills"]).toBeUndefined();
+    const listing = await rpc("resources/list");
+    expect(listing.result.resources.map((r: any) => r.uri)).toEqual([uri]);
+    expect((await rpc("resources/list", { cursor: "bad" })).error.code).toBe(-32602);
+    const preview = await (await get(`/api/skills/${id}/manifest`)).json();
+    expect(preview.revision).toBe(revision.revision);
+    expect(preview.skill.resources).toHaveLength(4);
+    const content = await rpc("resources/read", { uri });
+    expect(content.result.contents[0].text).toBe(Buffer.from(files(id)[0].content, "base64").toString("utf8"));
+    const blob = await rpc("resources/read", { uri: skillResourceUri(loaded.referenceId, id, "assets/data.bin") });
+    expect(Buffer.from(blob.result.contents[0].blob, "base64")).toEqual(bytes);
+    const large = await rpc("resources/read", { uri: skillResourceUri(loaded.referenceId, id, "references/large.txt") });
+    expect(large.result.contents[0].text).toHaveLength(170_000);
+    const other = await load(ADMIN, legacyId);
+    for (const denied of [skillResourceUri(other.referenceId, legacyId), uri.replace(id, "wrong-name"), uri.replace("SKILL.md", "%2e%2e/SKILL.md")])
+      expect((await rpc("resources/read", { uri: denied })).error.code).toBe(-32602);
+    expect((await get("/api/skill-compatibility")).status).toBe(403);
+    expect((await get(`/api/skills/${legacyId}/manifest`)).status).toBe(404);
+    expect((await get(`/api/skills/${legacyId}/manifest`, process.env.SKILLBOX_ADMIN_TOKEN!)).status).toBe(422);
+    const { compatibilityPage } = await import("../src/server/skill-resources");
+    const auditItems = [];
+    for (let offset = 0;;) {
+      const page = await compatibilityPage(ADMIN, offset);
+      auditItems.push(...page.items);
+      if (!page.hasMore) break;
+      offset = page.nextOffset!;
+    }
+    expect(auditItems.find((item) => item.id === legacyId)?.issues.some((issue) => issue.code === "name")).toBe(true);
+    expect((await load(ADMIN, legacyId)).instructions).toContain("Legacy");
+    const changed = await publish(ADMIN, id, files(id, "Updated"), revision.revision);
+    const next = await (await get(`/api/skills/${id}/manifest`)).json();
+    expect(next.skill.uri).toBe(uri);
+    expect(next.skill.resources[0].digest).not.toBe(preview.skill.resources[0].digest);
+    const hidden = await setDisabled(ADMIN, id, true, changed.revision);
+    expect((await rpc("resources/read", { uri })).error.code).toBe(-32602);
+    expect((await rpc("resources/list")).result.resources).toEqual([]);
+    const enabled = await setDisabled(ADMIN, id, false, hidden.revision);
+    await archiveSkill(ADMIN, id, enabled.revision);
+    expect((await rpc("resources/read", { uri })).error.code).toBe(-32602);
+  } finally {
+    await db.delete(events).where(eq(events.clientId, client.id));
+    await db.delete(clients).where(eq(clients.id, client.id));
+  }
+});
+
 test("recommendations authorize full leaf catalog before scoring and invalidate grants/lifecycle/revisions", async () => {
   const names = Array.from(
     { length: 6 },
