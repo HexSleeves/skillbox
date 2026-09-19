@@ -36,9 +36,42 @@ if (
       config.allowInsecureHttp === true)
   )
 )
-  throw new Error("Use HTTPS outside localhost. For a trusted LAN only, explicitly set SKILLBOX_ALLOW_INSECURE_HTTP=1.");
+  throw new Error(
+    "Use HTTPS outside localhost. For a trusted LAN only, explicitly set SKILLBOX_ALLOW_INSECURE_HTTP=1.",
+  );
 let harness = "skillbox-cli";
-async function request(path, options = {}) {
+// Mirror modern MCP body metadata into its required HTTP headers (SEP-2243).
+// Keep this bridge dependency-free so installed Node/Bun clients need no SDK.
+function mcpRequestHeaders(message) {
+  const version =
+    message.params?._meta?.["io.modelcontextprotocol/protocolVersion"];
+  if (
+    typeof version !== "string" ||
+    typeof message.method !== "string" ||
+    message.id === undefined
+  )
+    return {};
+  const headers = {
+    "MCP-Protocol-Version": version,
+    "Mcp-Method": message.method,
+  };
+  const name =
+    message.method === "resources/read"
+      ? message.params?.uri
+      : message.params?.name;
+  if (typeof name === "string") {
+    const encoded =
+      !name ||
+      name.trim() !== name ||
+      /[^\x09\x20-\x7e]/.test(name) ||
+      (name.startsWith("=?base64?") && name.endsWith("?="));
+    headers["Mcp-Name"] = encoded
+      ? `=?base64?${Buffer.from(name, "utf8").toString("base64")}?=`
+      : name;
+  }
+  return headers;
+}
+async function request(path, options = {}, preserveProtocolErrors = false) {
   if (!token) throw new Error("Set SKILLBOX_TOKEN or configure the client");
   const r = await fetch(base + path, {
     ...options,
@@ -58,7 +91,18 @@ async function request(path, options = {}) {
   });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
-    throw new Error(d.error ?? `Library HTTP ${r.status}`);
+    // Modern MCP uses HTTP 400 for negotiation/envelope errors. Preserve the
+    // JSON-RPC envelope so a stdio client can select a supported protocol.
+    if (
+      preserveProtocolErrors &&
+      d.jsonrpc === "2.0" &&
+      typeof d.error?.code === "number" &&
+      typeof d.error?.message === "string"
+    )
+      return d;
+    throw new Error(
+      typeof d.error === "string" ? d.error : `Library HTTP ${r.status}`,
+    );
   }
   if (r.status === 202) return null;
   const declared = Number(r.headers.get("content-length") ?? 0);
@@ -90,19 +134,25 @@ async function main() {
       let msg;
       try {
         msg = JSON.parse(line);
-        if (
-          msg.method === "initialize" &&
-          typeof msg.params?.clientInfo?.name === "string"
-        )
+        const clientInfo =
+          msg.method === "initialize"
+            ? msg.params?.clientInfo
+            : msg.params?._meta?.["io.modelcontextprotocol/clientInfo"];
+        if (typeof clientInfo?.name === "string")
           harness =
-            msg.params.clientInfo.name.slice(0, 100) +
-            (msg.params.clientInfo.version
-              ? "/" + String(msg.params.clientInfo.version).slice(0, 40)
+            clientInfo.name.slice(0, 100) +
+            (clientInfo.version
+              ? "/" + String(clientInfo.version).slice(0, 40)
               : "");
-        const data = await request("/mcp", {
-          method: "POST",
-          body: JSON.stringify(msg),
-        });
+        const data = await request(
+          "/mcp",
+          {
+            method: "POST",
+            headers: mcpRequestHeaders(msg),
+            body: JSON.stringify(msg),
+          },
+          true,
+        );
         if (data) process.stdout.write(JSON.stringify(data) + "\n");
       } catch (e) {
         if (msg?.id !== undefined)
@@ -179,20 +229,38 @@ async function main() {
       offset = page.nextOffset;
     }
     const incompatible = items.filter((item) => !item.compatible).length;
-    console.log(JSON.stringify({
-      format: "skillbox/compatibility-v1",
-      total: items.length,
-      compatible: items.length - incompatible,
-      incompatible,
-      warningCount: items.reduce((n, item) => n + item.issues.filter((issue) => issue.severity === "warning").length, 0),
-      items,
-    }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          format: "skillbox/compatibility-v1",
+          total: items.length,
+          compatible: items.length - incompatible,
+          incompatible,
+          warningCount: items.reduce(
+            (n, item) =>
+              n +
+              item.issues.filter((issue) => issue.severity === "warning")
+                .length,
+            0,
+          ),
+          items,
+        },
+        null,
+        2,
+      ),
+    );
     if (incompatible) process.exitCode = 1;
     return;
   }
   if (command === "manifest") {
     if (!arg) throw new Error("Usage: skillbox manifest <id>");
-    console.log(JSON.stringify(await request("/api/skills/" + encodeURIComponent(arg) + "/manifest"), null, 2));
+    console.log(
+      JSON.stringify(
+        await request("/api/skills/" + encodeURIComponent(arg) + "/manifest"),
+        null,
+        2,
+      ),
+    );
     return;
   }
   if (command === "load") {

@@ -258,6 +258,39 @@ export function inspectSkillPackage(
   return { compatible, issues, manifest };
 }
 
+// MIME mapping adapted from Matt Van Horn's contribution in kitze/skillbox#2.
+const MIME_BY_EXTENSION: Record<string, string> = {
+  md: "text/markdown",
+  markdown: "text/markdown",
+  txt: "text/plain",
+  json: "application/json",
+  js: "text/javascript",
+  mjs: "text/javascript",
+  cjs: "text/javascript",
+  ts: "text/plain",
+  sh: "text/x-shellscript",
+  bash: "text/x-shellscript",
+  html: "text/html",
+  css: "text/css",
+  yml: "text/yaml",
+  yaml: "text/yaml",
+  xml: "application/xml",
+  svg: "image/svg+xml",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  bin: "application/octet-stream",
+};
+export function mimeTypeForPath(path: string) {
+  return (
+    MIME_BY_EXTENSION[path.split(".").pop()?.toLowerCase() ?? ""] ??
+    "application/octet-stream"
+  );
+}
+
 export function resourceContent(uri: string, file: SkillFile) {
   const bytes = verifiedFileBytes(file);
   try {
@@ -268,13 +301,13 @@ export function resourceContent(uri: string, file: SkillFile) {
     if (text.includes("\0")) throw new Error("Binary content");
     return {
       uri,
-      mimeType: file.path.endsWith(".md") ? "text/markdown" : "text/plain",
+      mimeType: mimeTypeForPath(file.path),
       text,
     };
   } catch {
     return {
       uri,
-      mimeType: "application/octet-stream",
+      mimeType: mimeTypeForPath(file.path),
       blob: bytes.toString("base64"),
     };
   }

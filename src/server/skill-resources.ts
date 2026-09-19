@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "./db";
 import { skills, revisions } from "./schema";
 import * as library from "./library";
@@ -55,31 +55,62 @@ export async function manifestFor(p: Principal, id: string) {
   };
 }
 
-// Transport-neutral projection for a future SDK Skills adapter. No new protocol
-// capability is advertised until the base protocol and host gates are verified.
+// One grant expansion and one joined page query, not repeated graph scans and
+// revision lookups per skill. Each entry and its files share one DB snapshot.
 export async function manifestPage(p: Principal, cursor?: string) {
   if (cursor !== undefined && !/^v1:(0|[1-9][0-9]{0,8})$/.test(cursor))
     throw new library.Problem(400, "Invalid resource cursor");
   const offset = cursor === undefined ? 0 : Number(cursor.slice(3));
-  const page = await library.search(p, "", PAGE_SIZE, offset);
-  const entries = [];
-  for (const item of page.items) {
-    try {
-      entries.push((await manifestFor(p, item.id)).skill);
-    } catch (error) {
-      // Incompatible legacy packages remain available through existing tools.
-      // Concurrent revocation/removal must not turn a listing into a disclosure.
-      if (
-        !(error instanceof library.Problem) ||
-        ![404, 422].includes(error.status)
-      )
-        throw error;
-    }
-  }
+  const grant =
+    p.role === "admin" || p.allSkills
+      ? undefined
+      : inArray(skills.id, await library.authorizedIds(p));
+  const rows = await db
+    .select({ skill: skills, revision: revisions })
+    .from(skills)
+    .innerJoin(
+      revisions,
+      and(eq(revisions.id, skills.revision), eq(revisions.skillId, skills.id)),
+    )
+    .where(
+      and(
+        grant,
+        eq(skills.kind, "skill"),
+        eq(skills.disabled, false),
+        eq(skills.archived, false),
+      ),
+    )
+    .orderBy(skills.id)
+    .limit(PAGE_SIZE + 1)
+    .offset(offset);
+  const entries = rows.slice(0, PAGE_SIZE).flatMap(({ skill, revision }) => {
+    const { manifest } = inspectSkillPackage(
+      skill.referenceId,
+      skill.id,
+      revision.files,
+    );
+    return manifest ? [manifest] : [];
+  });
+  await library.record(p, "browse");
   return {
     skills: entries,
-    ...(page.hasMore ? { nextCursor: `v1:${page.nextOffset}` } : {}),
+    ...(rows.length > PAGE_SIZE
+      ? { nextCursor: `v1:${offset + PAGE_SIZE}` }
+      : {}),
   };
+}
+
+export async function manifestByUri(p: Principal, uri: string) {
+  let address;
+  try {
+    address = parseSkillResourceUri(uri);
+  } catch {
+    throw unavailable();
+  }
+  if (address.path !== "SKILL.md") throw unavailable();
+  const { skill } = await manifestFor(p, address.referenceId);
+  if (skill.uri !== uri) throw unavailable();
+  return { skill };
 }
 
 export async function readResource(p: Principal, uri: string) {

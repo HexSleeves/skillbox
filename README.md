@@ -186,19 +186,23 @@ Fetching validates every path, file hash, size, executable flag and package chec
 
 `scripts/install-client.py` optionally configures Codex, Claude or Cursor from explicit per-client credentials on stdin, preserving existing settings and making local backups. Review any installer before running it.
 
-## Native MCP Skills readiness
+## Native MCP Skills
 
-Skillbox now exposes compatible, authorized skills through base MCP `resources/list`
-and `resources/read`, alongside all existing tools. A manifest preview and owner-only
-compatibility audit prepare existing packages without rewriting them. Binary and large
-supporting files are available as resources; reading a resource never activates or
-executes a skill.
+Skillbox serves `io.modelcontextprotocol/skills` on MCP **2026-07-28** using the
+stable SDK v2: `server/discover`, `skills/list`, `skills/get`, and verified
+`resources/read`, including binary files. Catalogs contain complete manifests
+for authorized, active, compatible skills; cache hints remain private.
 
-Full `io.modelcontextprotocol/skills` support is **not advertised yet**: the current
-SDK/base protocol still needs the native discovery and negotiation upgrade. See
-[MCP Skills readiness and release gates](docs/mcp-skills.md) for exact shipped scope,
-URI semantics and migration steps. [Hosted roadmap](docs/hosted-roadmap.md) covers a
-future managed offering; this release remains single-owner and self-hosted.
+Existing 2025 clients, tools and CLI workflows keep working. The owner-only
+compatibility audit identifies legacy packages without rewriting them. Reading
+a resource never activates or executes a skill; native hosts own verification
+and approval. Optional directory reads are not advertised.
+
+Manually integrates [Matt Van Horn's PR #2](https://github.com/kitze/skillbox/pull/2)
+with the existing manifest, authorization and validation safeguards. See
+[Skills over MCP](docs/mcp-skills.md) for protocol details and verification scope.
+The [hosted roadmap](docs/hosted-roadmap.md) remains future work; this release is
+single-owner and self-hosted.
 
 ## Recommendation contract
 

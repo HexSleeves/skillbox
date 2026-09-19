@@ -62,11 +62,12 @@ export class EvaluationUnavailable extends Error {
 }
 const answerSchema = z.object({
   answers: z.record(
+    z.string(),
     z.object({
       type: z.literal("score"),
       score: z.number().finite().min(0).max(4),
       confidence: z.number().finite().min(0).max(1).optional(),
-      probabilities: z.record(z.number().finite().min(0).max(1)).optional(),
+      probabilities: z.record(z.string(), z.number().finite().min(0).max(1)).optional(),
     }),
   ),
   usage: z

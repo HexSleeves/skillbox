@@ -10,7 +10,7 @@ import {
 import type { JevProvider } from "../shared";
 
 const providerSchema = z.enum(["vercel", "typesafe"], {
-  errorMap: () => ({ message: "Choose Vercel AI Gateway or TypeSafe AI" }),
+  error: "Choose Vercel AI Gateway or TypeSafe AI",
 });
 const configSchema = z
   .object({
