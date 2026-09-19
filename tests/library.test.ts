@@ -649,6 +649,96 @@ test("released Skills protocol works with SDK v2 client, private manifests and l
   }
 });
 
+test("GitHub URL preview is owner-only and publish preserves SHA provenance and revision conflicts", async () => {
+  const { githubFixture, IMPORT_COMMIT } =
+    await import("./fixtures/github-import");
+  const id = "test-github-" + randomUUID().slice(0, 8);
+  ids.push(id);
+  const fixture = githubFixture(id);
+  const originalFetch = globalThis.fetch;
+  const request = (
+    route: string,
+    body: unknown,
+    key = process.env.SKILLBOX_ADMIN_TOKEN!,
+  ) =>
+    app.request(route, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  globalThis.fetch = fixture.fetcher;
+  try {
+    const url = `https://github.com/fixture/skills/tree/${IMPORT_COMMIT}/skills/example`;
+    expect(
+      (await request("/api/imports/github/preview", { url }, allowedToken))
+        .status,
+    ).toBe(403);
+    expect(fixture.requests).toHaveLength(0);
+    const preview = await request("/api/imports/github/preview", { url });
+    expect(preview.status).toBe(200);
+    const p = await preview.json();
+    expect(p.expectedRevision).toBeNull();
+    expect(p.files.every((file: any) => file.content === undefined)).toBe(true);
+    await expect(revisionFor(ADMIN, id)).rejects.toMatchObject({ status: 404 });
+    expect(
+      (
+        await request("/api/imports/github/publish", {
+          url: "https://github.com/fixture/skills/tree/main/skills/example",
+          id,
+          expectedRevision: null,
+        })
+      ).status,
+    ).toBe(400);
+    const published = await request("/api/imports/github/publish", {
+      url: p.source.url,
+      id,
+      expectedRevision: null,
+    });
+    expect(published.status).toBe(200);
+    const saved = await published.json();
+    const loaded = await load(ADMIN, id);
+    expect(loaded.source).toMatchObject({
+      repository: "fixture/skills",
+      commit: IMPORT_COMMIT,
+      path: "skills/example",
+    });
+    expect(loaded.instructions).toBe(p.instructions);
+    expect(
+      loaded.files.find((f) => f.path === "scripts/run.sh")?.executable,
+    ).toBe(true);
+    expect(
+      (
+        await request("/api/imports/github/publish", {
+          url: p.source.url,
+          id,
+          expectedRevision: null,
+        })
+      ).status,
+    ).toBe(409);
+    expect((await load(ADMIN, id)).revision).toBe(saved.revision);
+    const updated = await request("/api/imports/github/publish", {
+      url: p.source.url,
+      id,
+      expectedRevision: saved.revision,
+    });
+    expect(updated.status).toBe(200);
+    const restored = await request(`/api/skills/${id}/restore`, {
+      revision: saved.revision,
+      expectedRevision: (await updated.json()).revision,
+    });
+    expect(restored.status).toBe(200);
+    expect((await load(ADMIN, id)).source?.commit).toBe(IMPORT_COMMIT);
+    expect((await revisionFor(ADMIN, id, saved.revision)).source?.commit).toBe(
+      IMPORT_COMMIT,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("recommendations authorize full leaf catalog before scoring and invalidate grants/lifecycle/revisions", async () => {
   const names = Array.from(
     { length: 6 },
@@ -954,7 +1044,11 @@ test("provider switching preserves separate encrypted keys, migrates Gateway set
     await configureGateway({ apiKey: "fixture-legacy-gateway" });
     const status = await gatewaySettings();
     expect(status.provider).toBe("vercel"); // Old Gateway-only clients never retarget keys to TypeSafe.
-    expect(status.providers).toEqual({ vercel: { configured: true }, typesafe: { configured: true } });
+    expect(status.providers).toEqual({ vercel: { configured: true }, typesafe: { configured: true }, openrouter: { configured: false } });
+    await configureGateway({ provider: "openrouter" });
+    expect(await gatewaySettings()).toMatchObject({ provider: "openrouter", configured: false });
+    await configureGateway({ provider: "openrouter", apiKey: "fixture-openrouter-key" });
+    expect(await gatewaySettings()).toMatchObject({ provider: "openrouter", configured: true, providers: { vercel: { configured: true }, typesafe: { configured: true }, openrouter: { configured: true } } });
     expect(JSON.stringify(status)).not.toContain("fixture-");
     const stored = await connection`SELECT value FROM workspace_settings WHERE id='ai_gateway'`;
     expect(JSON.stringify(stored)).not.toContain("fixture-");
@@ -962,6 +1056,7 @@ test("provider switching preserves separate encrypted keys, migrates Gateway set
     expect(invalid.status).toBe(400);
   } finally {
     globalThis.fetch = previousFetch;
+    await configureGateway({ provider: "openrouter", apiKey: null });
     await configureGateway({ provider: "typesafe", apiKey: null });
     await configureGateway({ provider: "vercel", apiKey: null });
   }

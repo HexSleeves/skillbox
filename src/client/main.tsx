@@ -2,6 +2,7 @@ import { ClientsPage, ProfilesPage, ProposalsPage } from "./access-pages";
 import { referenceId, skillReferenceMarkdown } from "../skill-references";
 import { SkillReference, ReferencePicker } from "./skill-reference";
 import { ExecutorSettings, SkillIntegrations } from "./executor-settings";
+import { GitHubImportPage } from "./github-import";
 import { isIconAsset } from "../package-metrics";
 import { SkillMetrics, LENGTH_BANDS, lengthBand } from "./skill-metrics";
 import { SkillIconView, SkillIconEditor } from "./skill-icon";
@@ -498,11 +499,18 @@ function LibraryPage() {
         <div>
           <h1>Library</h1>
         </div>
-        <Button asChild>
-          <Link to="/new">
-            <Plus size={16} /> New skill or bundle
-          </Link>
-        </Button>
+        <div className="filters">
+          {auth.role === "admin" && (
+            <Button variant="outline" asChild>
+              <Link to="/import/github">Import from GitHub</Link>
+            </Button>
+          )}
+          <Button asChild>
+            <Link to="/new">
+              <Plus size={16} /> New skill or bundle
+            </Link>
+          </Button>
+        </div>
       </header>
       <div className="library-toolbar">
         <div className="search-field">
@@ -801,6 +809,11 @@ function SkillPage() {
           <div>
             <h1>{loaded.metadata.title}</h1>
             <p>{loaded.metadata.tags.join(" · ") || "General workflow"}</p>
+            {loaded.source?.type === "github" && (
+              <a href={loaded.source.url} target="_blank" rel="noreferrer">
+                {loaded.source.repository}@{loaded.source.commit.slice(0, 12)}
+              </a>
+            )}
           </div>
           {loaded.referenceId && (
             <CopyButton
@@ -1692,6 +1705,11 @@ const connectRoute = createRoute({
   path: "/connect",
   component: ConnectPage,
 });
+const githubImportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/import/github",
+  component: GitHubImportPage,
+});
 const router = createRouter({
   routeTree: rootRoute.addChildren([
     indexRoute,
@@ -1705,6 +1723,7 @@ const router = createRouter({
     activityRoute,
     settingsRoute,
     connectRoute,
+    githubImportRoute,
   ]),
 });
 declare module "@tanstack/react-router" {

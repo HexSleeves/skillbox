@@ -10,7 +10,12 @@ import matter from "gray-matter";
 import { and, eq, desc, inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import { skills, revisions, events } from "./schema";
-import type { Principal, SkillFile, SkillMetadata } from "../shared";
+import type {
+  Principal,
+  SkillFile,
+  SkillMetadata,
+  GitHubSource,
+} from "../shared";
 import { expandBundles } from "./bundles";
 import { gatewayRecommender, gatewaySettings } from "./gateway";
 import {
@@ -359,7 +364,10 @@ export async function recommendSkills(
     signal,
   );
   await record(await principal(), "recommend");
-  return { ...result, ...(configured ? { provider: configured.provider } : {}) };
+  return {
+    ...result,
+    ...(configured ? { provider: configured.provider } : {}),
+  };
 }
 export async function revisionFor(p: Principal, id: string, revision?: string) {
   id = await resolveReferenceId(id);
@@ -430,6 +438,7 @@ export async function load(p: Principal, id: string, revision?: string) {
     ...(await referenceDetails(p, instructions)),
     revision: r.id,
     checksum: r.checksum,
+    source: r.source ?? null,
     metadata: { ...r.metadata, disabled: r.metadata.disabled ?? false },
     instructions: Buffer.from(
       r.files.find((f) => f.path === "SKILL.md")!.content,
@@ -488,6 +497,7 @@ export async function publish(
   importReferenceId?: string,
   options: {
     archive?: boolean;
+    source?: GitHubSource;
     database?: Pick<typeof db, "transaction">;
   } = {},
 ) {
@@ -626,20 +636,19 @@ export async function publish(
       skillId: id,
       files,
       metadata: meta,
+      source: options.source,
       checksum,
       message: message.slice(0, 200),
       author: p.name,
     });
-    await tx
-      .insert(events)
-      .values({
-        id: randomUUID(),
-        clientId: p.id,
-        clientName: p.name,
-        operation: "publish",
-        skillId: id,
-        context: { ...p.context, revision },
-      });
+    await tx.insert(events).values({
+      id: randomUUID(),
+      clientId: p.id,
+      clientName: p.name,
+      operation: "publish",
+      skillId: id,
+      context: { ...p.context, revision },
+    });
   });
   return { id, revision, checksum };
 }
@@ -652,6 +661,7 @@ export async function history(p: Principal, id: string) {
       author: revisions.author,
       createdAt: revisions.createdAt,
       checksum: revisions.checksum,
+      source: revisions.source,
     })
     .from(revisions)
     .where(eq(revisions.skillId, id))

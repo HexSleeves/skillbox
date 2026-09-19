@@ -1,5 +1,29 @@
 import type { SkillIcon } from "./skill-icons";
-export type JevProvider = "vercel" | "typesafe";
+export type JevProvider = "vercel" | "typesafe" | "openrouter";
+export type GitHubSource = {
+  type: "github";
+  repository: string;
+  commit: string;
+  path: string;
+  url: string;
+};
+export type GitHubImportPreview =
+  | { kind: "catalog"; url: string; commit: string; candidates: string[] }
+  | {
+      kind: "skill";
+      id: string;
+      source: GitHubSource;
+      instructions: string;
+      files: Omit<SkillFile, "content">[];
+      skipped: string[];
+      warnings: {
+        code: string;
+        path: string;
+        message: string;
+        severity: string;
+      }[];
+      expectedRevision: string | null;
+    };
 export type SkillFile = {
   path: string;
   content: string;

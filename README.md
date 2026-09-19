@@ -1,4 +1,5 @@
 <!-- readme-sync:repo:start -->
+
 # skillbox
 
 Self\-hosted, versioned skills library for AI agents\. MCP, scoped clients, and optional Jev recommendations\.
@@ -11,7 +12,6 @@ Self\-hosted, versioned skills library for AI agents\. MCP, scoped clients, and 
   <a href="https://kitze.io/?ref=kitze%2Fskillbox">kitze.io</a> · <a href="https://x.com/thekitze?ref=kitze%2Fskillbox">X</a> · <a href="https://youtube.com/kitze?ref=kitze%2Fskillbox">YouTube</a>
 </p>
 <br clear="all">
-
 
 <h3>More projects by Kitze</h3>
 <table>
@@ -109,8 +109,9 @@ A self-hosted, versioned skills library for AI agents. React, Bun, Hono and Post
 - Revocable client keys, usage reporting and owner-reviewed updates.
 - HTTP MCP, a Node/Bun stdio bridge and checksum-verified CLI downloads.
 - Base MCP Resources, standards-shaped skill manifests and a non-mutating compatibility audit.
-- Optional task-aware Jev recommendations using **your own TypeSafe AI or Vercel AI Gateway key**.
+- Optional task-aware Jev recommendations using **your own OpenRouter, TypeSafe AI or Vercel AI Gateway key**.
 - Optional Executor integration using **your own endpoint and authentication**.
+- Public GitHub URL imports with commit-pinned previews and revision conflict checks.
 - Native folder imports/exports, protected PostgreSQL/config backups and explicit restore tooling.
 - Docker-only setup, optional Caddy HTTPS and Umbrel package generation.
 
@@ -146,13 +147,13 @@ bun run start
 
 ## Jev setup
 
-Open **Settings → Jev recommendations**, select **Vercel AI Gateway** (default) or **TypeSafe AI**, and save that provider's API key. Keys are stored separately: selecting TypeSafe never sends your Gateway key to TypeSafe, and switching back retains your saved Gateway key. Removing the selected provider's key disables its model calls. Skillbox does not auto-import environment keys, fetch credentials from a skill library, or ship an application-wide provider account.
+Open **Settings → Jev recommendations**, select **Vercel AI Gateway** (default), **TypeSafe AI**, or **OpenRouter**, and save that provider's API key. Keys are stored separately: switching providers never sends another provider's key, and switching back retains its saved key. Removing the selected provider's key disables its model calls. Skillbox does not auto-import environment keys, fetch credentials from a skill library, or ship an application-wide provider account.
 
 The key is encrypted server-side in PostgreSQL using AES-256-GCM with key material derived from your `SKILLBOX_ADMIN_TOKEN`. It is never returned by the settings API or included in browser bundles. Protect the owner token and database backups. Changing that token makes stored integration credentials unreadable. Follow the [rotation guidance](docs/deployment.md) before changing it.
 
 Saving a key does not validate provider access or buy credits. Jev sends task text and authorized active skill descriptions to the selected provider; its charges and data handling apply to your account. Without that provider's saved key, or on failure, recommendations return deterministic search with an explicit fallback reason and attempted `provider`.
 
-TypeSafe uses `POST https://api.typesafe.ai/v1/systemone`, Bearer authentication and `model: "jev-latest"`, without Gateway protocol headers. Gateway keeps its evaluation-model endpoint and existing headers. Both use the same bounded catalog and score rubric; TypeSafe's snake-case usage fields are normalized. Provider/key changes invalidate cached and in-flight results. The direct contract follows the [TypeSafe OpenAPI schema](https://api.typesafe.ai/openapi.json).
+TypeSafe uses `POST https://api.typesafe.ai/v1/systemone`, Bearer authentication and `model: "jev-latest"`, without Gateway protocol headers. Gateway keeps its evaluation-model endpoint and existing headers. OpenRouter uses `POST https://openrouter.ai/api/alpha/decisions` with `model: "typesafe/jev-1.13"`, not the chat-completions endpoint. All three use the same bounded catalog and score rubric. OpenRouter evaluates the complete catalog in batches of at most 32 skills / 24,000 request bytes, with two concurrent batches under the existing eight-second deadline. Any failed batch falls back for the whole request; no partial ranking is returned. Snake-case usage fields are normalized, and OpenRouter's reported `usage.cost` is aggregated across successful batches. Provider/key changes invalidate cached and in-flight results. The direct contract follows the [TypeSafe OpenAPI schema](https://api.typesafe.ai/openapi.json).
 
 ## Agents and CLI
 
@@ -221,7 +222,17 @@ MCP: `recommend_skills({task, limit?, offset?})`. HTTP: `POST /api/skill-recomme
 - Process-local cache: task, authenticated scope, catalog descriptions/revisions, provider-settings revision and model/rubric version. Maximum 128 entries, five-minute TTL. Two concurrent evaluations; ten uncached requests per scope/minute. No automatic retries.
 - Grants, lifecycle and revisions are checked before model calls and re-read afterward, including cache hits. Key replacement/removal resets model/cache state. Stale results are discarded. Tasks and descriptions are evidence, not executable instructions.
 
-For an optional **billable developer benchmark**, use `bun scripts/benchmark-recommendations.ts --live --provider vercel` with your own `AI_GATEWAY_API_KEY`, or `--provider typesafe` with `TYPESAFE_API_KEY` / `JEV_KEY`. This separate script does not configure the app or save credentials. Missing provider-reported cost is shown as unknown, not zero. Its small synthetic sample is not a production latency SLA or probability calibration.
+For an optional **billable developer benchmark**, use `bun scripts/benchmark-recommendations.ts --live --provider vercel` with your own `AI_GATEWAY_API_KEY`, `--provider typesafe` with `TYPESAFE_API_KEY` / `JEV_KEY`, or `--provider openrouter` with `OPENROUTER_API_KEY`. This separate script does not configure the app or save credentials. Missing provider-reported cost is shown as unknown, not zero. Its small synthetic sample is not a production latency SLA or probability calibration.
+
+## Import from GitHub
+
+Owners can choose **Import from GitHub** in the library and paste a public repository, `/tree/<ref>/<folder>`, or `/blob/<ref>/…/SKILL.md` URL. Collections prompt for a skill directory. Branches containing slashes resolve longest matching ref first; use a full commit SHA to remove ambiguity.
+
+Preview downloads and validates the package without publishing. Review `SKILL.md`, files, excluded artifacts and the pinned commit, then explicitly import. Existing skill IDs require an overwrite checkbox and **Publish new revision**; stale revisions return a conflict rather than overwrite newer edits. Existing bundles, disabled and archived entries cannot be replaced through import.
+
+Publication downloads the previewed commit again, validates Git blob hashes, and records repository, full commit SHA and directory on the immutable revision. Package bytes and executable flags are preserved; no scripts run. Owner-only endpoints: `POST /api/imports/github/preview` (`url`, optional repository-relative `path`) and `POST /api/imports/github/publish` (`url` from the preview, `id`, `expectedRevision`).
+
+Public repositories only: no GitHub token, private repositories, redirects, symlinks, submodules or Git LFS. Limits: 400 files, 2 MB per file, 8 MB per package, 30-second deadline, two active imports and 12 attempts/minute per instance. Truncated or oversized repository trees fail closed. Runtime artifacts and `.env*` files are excluded; recognizable embedded secrets block import. Secret detection is heuristic, not a guarantee that imported content is safe.
 
 ## Data portability
 
@@ -245,7 +256,6 @@ bash scripts/test-isolated.sh
 The isolated suite creates and removes its own Compose PostgreSQL instance without published ports. It covers authorization, revisions, API/MCP behavior, CLI, encrypted settings and recommendations; image creation also builds the frontend. Never run database tests against production.
 
 See [SECURITY.md](SECURITY.md), [deployment notes](docs/deployment.md), and [release checklist](docs/open-source-readiness.md). Skillbox is a single-owner, self-hosted application with scoped clients—not a public multi-tenant SaaS. No analytics, hosted account, preloaded catalog or automatic paid-provider connection is required.
-
 
 <!-- readme-sync:footer:start -->
 <hr>
